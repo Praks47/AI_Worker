@@ -1,0 +1,1175 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Tabs Navigation -->
+<nav class="tabs-nav">
+  <button class="tab-btn active" onclick="switchTab('tab-runner')">
+    🤖 Task Runner
+  </button>
+  <button class="tab-btn" onclick="switchTab('tab-docs')">
+    📄 Documents & Extraction Lab
+  </button>
+  <button class="tab-btn" onclick="switchTab('tab-invoices')">
+    💼 Invoices & Records
+  </button>
+  <button class="tab-btn" onclick="switchTab('tab-reliability')">
+    ⚡ Reliability Lab & History
+  </button>
+  <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+    <button class="btn btn-outline btn-sm" onclick="refreshDashboardState()">↻ Refresh State</button>
+    <button class="btn btn-danger btn-sm" onclick="resetEnvironment()">⟲ Reset Seed DB & Faults</button>
+  </div>
+</nav>
+
+<!-- ========================================================================= -->
+<!-- TAB 1: TASK RUNNER (AUTONOMOUS AI TASK WORKER)                           -->
+<!-- ========================================================================= -->
+<div id="tab-runner" class="tab-pane active">
+  <div class="card">
+    <div class="card-title">
+      <span>Autonomous Task Execution (Categories A–E)</span>
+      <span class="muted" style="font-size: 12px; font-weight: normal;">Powered by AgentOrchestrator & OperationEngine</span>
+    </div>
+
+    <!-- Predefined Scenario Shortcuts -->
+    <div style="margin-bottom: 12px;">
+      <span style="font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Benchmark Scenario Shortcuts:</span>
+      <div style="margin-top: 4px;">
+        <span class="chip" onclick="setPrompt('When does our contract with Acme expire?')">A1: Acme Contract Expiry</span>
+        <span class="chip" onclick="setPrompt('Find the latest invoice from Wayne Enterprises and record it in the finance system.')">B1: Record Wayne Invoice</span>
+        <span class="chip" onclick="setPrompt('Record the latest Acme invoice and tell me what\'s due.')">C1: Superseded Acme Revision</span>
+        <span class="chip" onclick="setPrompt('Record the latest Globex invoice.')">D1: Duplicate Globex Check</span>
+        <span class="chip" onclick="setPrompt('Find the latest invoice from Hooli and record it.')">D2: Missing Hooli Invoice</span>
+        <span class="chip" onclick="setPrompt('Record the latest invoice from Pied Piper Supplies.')">D3: Corrupted Pied Piper Amount</span>
+        <span class="chip" onclick="setPrompt('Record the latest invoice from Initech.')">D4: Ambiguous Initech Dates</span>
+        <span class="chip" onclick="setPrompt('Record the latest Umbrella Chemicals invoice.')">D5: Umbrella Due Date (Net 45)</span>
+        <span class="chip" onclick="setPrompt('Pay the Globex invoice INV-1002.')">E1: Pay Globex (Governed Action)</span>
+      </div>
+    </div>
+
+    <!-- Prompt Input Form -->
+    <div class="form-group">
+      <label for="task-prompt">Enter Natural Language Instruction:</label>
+      <textarea id="task-prompt" rows="3" placeholder="e.g., 'Find the latest invoice from Wayne Enterprises and record it in the finance system.' or 'When does our contract with Acme expire?'"></textarea>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <button id="btn-run-task" class="btn btn-primary" onclick="runTask()">
+        <span id="btn-run-spinner" class="spinner" style="display: none;"></span>
+        <span>Execute Task</span>
+      </button>
+      <span id="task-timer" class="muted" style="font-size: 12px;"></span>
+    </div>
+  </div>
+
+  <!-- Active Task Result Area -->
+  <div id="task-result-container" style="display: none;">
+    <!-- Clarification Card (shown if status == needs_clarification) -->
+    <div id="clarification-card" class="card" style="display: none; border-left: 4px solid var(--warning); background: #fffdf5;">
+      <div class="card-title" style="color: var(--warning);">
+        <span>⚠️ Clarification Required</span>
+        <span class="badge needs_clarification">NEEDS_CLARIFICATION</span>
+      </div>
+      <p id="clarification-prompt-text" style="font-weight: 500; margin-top: 0;"></p>
+      <div style="margin-bottom: 12px;">
+        <span style="font-size: 12px; font-weight: 600; color: #475569;">Select Candidate Option:</span>
+        <div id="clarification-options-list" style="margin-top: 6px;"></div>
+      </div>
+      <div class="form-group" style="max-width: 400px;">
+        <input type="text" id="clarification-custom-input" placeholder="Or type candidate name / invoice #...">
+      </div>
+      <button class="btn btn-warning" style="background: var(--warning); color: #fff;" onclick="submitClarification()">
+        Resume with Clarification
+      </button>
+    </div>
+
+    <!-- HMAC Approval Card (shown if status == needs_approval) -->
+    <div id="approval-card" class="card" style="display: none; border-left: 4px solid var(--danger); background: #fffbfb;">
+      <div class="card-title" style="color: var(--danger);">
+        <span>🔒 Consequential Action Governance Gate</span>
+        <span class="badge needs_approval">NEEDS_APPROVAL</span>
+      </div>
+      <p id="approval-prompt-text" style="font-weight: 500; margin-top: 0;"></p>
+      <div style="background: #fff; padding: 12px; border: 1px solid #fee2e2; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
+        <div><strong>Cryptographic Token:</strong> <code id="approval-token-preview" style="word-break: break-all; color: #991b1b;"></code></div>
+        <div style="margin-top: 4px;"><strong>Enforced Governance:</strong> Policy 3.a (Supervisor Approval) | Policy 3.b (Finance Manager for ≥ 50,000)</div>
+      </div>
+      <div class="form-group" style="max-width: 320px;">
+        <label for="approval-role-select">Approver Authorization Role:</label>
+        <select id="approval-role-select">
+          <option value="supervisor">Supervisor (Authorized for &lt; 50,000)</option>
+          <option value="finance_manager">Finance Manager (Authorized for all amounts)</option>
+        </select>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button class="btn btn-success" onclick="submitApproval(true)">
+          ✓ Approve &amp; Execute Payment
+        </button>
+        <button class="btn btn-outline" onclick="submitApproval(false)">
+          ✗ Deny Payment (Fail-Safe)
+        </button>
+        <button class="btn btn-danger btn-sm" onclick="testApprovalBypass()">
+          ⚡ Test Governance Bypass (Verify Fail-Closed Block)
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Execution Outcome Card -->
+    <div class="card">
+      <div class="card-title">
+        <span>Execution Outcome</span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <span id="res-task-id" class="muted" style="font-size: 12px; font-family: monospace;"></span>
+          <span id="res-status-badge" class="badge"></span>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Summary / Answer:</div>
+        <div id="res-summary-box" style="font-size: 15px; font-weight: 500; margin-top: 4px; padding: 12px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--accent);"></div>
+      </div>
+
+      <!-- Grounded Evidence Box -->
+      <div id="res-evidence-container" style="display: none; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Cited Source Evidence:</div>
+        <div id="res-evidence-box" style="margin-top: 4px; padding: 10px 14px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 13px;"></div>
+      </div>
+
+      <!-- Failures & Warnings Box -->
+      <div id="res-failures-container" style="display: none; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--danger); text-transform: uppercase;">Failures / Disclosures:</div>
+        <div id="res-failures-box" style="margin-top: 4px; padding: 10px 14px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; font-size: 13px;"></div>
+      </div>
+
+      <!-- Audit Steps -->
+      <div id="res-audit-container" style="margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Execution Steps &amp; Verification Trail:</div>
+        <ul id="res-audit-list" style="margin: 6px 0 0 20px; padding: 0; font-size: 12px; color: #334155;"></ul>
+      </div>
+
+      <!-- Raw JSON Details (collapsible) -->
+      <details>
+        <summary style="font-size: 12px; font-weight: 600; color: var(--accent); cursor: pointer;">View Raw JSON Response</summary>
+        <pre id="res-json-view" class="json-box" style="margin-top: 8px;"></pre>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- TAB 2: DOCUMENTS & EXTRACTION LAB                                        -->
+<!-- ========================================================================= -->
+<div id="tab-docs" class="tab-pane">
+  <div class="grid-2">
+    <!-- Documents Browser List -->
+    <div class="card">
+      <div class="card-title">
+        <span>Discovered Documents</span>
+        <button class="btn btn-outline btn-sm" onclick="openCreateDocModal()">+ Create Test Document</button>
+      </div>
+      <div style="margin-bottom: 10px; display: flex; gap: 8px;">
+        <input type="text" id="docs-search-input" placeholder="Filter by name or folder..." oninput="filterDocsList()">
+        <select id="docs-folder-filter" style="width: 140px;" onchange="filterDocsList()">
+          <option value="">All Folders</option>
+          <option value="invoices">invoices</option>
+          <option value="contracts">contracts</option>
+          <option value="policies">policies</option>
+          <option value="custom">custom</option>
+        </select>
+      </div>
+      <div style="max-height: 480px; overflow-y: auto;">
+        <table id="docs-table">
+          <thead>
+            <tr><th>File</th><th>Folder</th><th>Format</th><th>Size</th><th>Action</th></tr>
+          </thead>
+          <tbody id="docs-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Document Inspector & Field Extraction View -->
+    <div class="card">
+      <div class="card-title">
+        <span>Document Inspection &amp; Deterministic Extraction</span>
+        <span id="inspecting-file-name" class="badge" style="display: none;"></span>
+      </div>
+
+      <div id="doc-inspect-empty" class="empty">
+        Select any document on the left to inspect raw content, page OCR, and run deterministic field extraction &amp; evidence verification.
+      </div>
+
+      <div id="doc-inspect-content" style="display: none;">
+        <!-- Inspection Controls -->
+        <div style="display: flex; gap: 8px; margin-bottom: 14px; align-items: center;">
+          <input type="text" id="inspect-custom-fields" placeholder="Custom requested fields (e.g. po_number, discount, payment_terms)..." style="font-size: 12px;">
+          <button class="btn btn-outline btn-sm" onclick="reExtractCurrentDoc()">Re-extract</button>
+          <a id="inspect-download-link" href="#" class="btn btn-outline btn-sm" target="_blank">Download</a>
+        </div>
+
+        <!-- Extraction Summary Header -->
+        <div style="display: flex; gap: 12px; margin-bottom: 14px; align-items: center; background: #f8fafc; padding: 10px; border-radius: 6px;">
+          <div><strong>Extraction Status:</strong> <span id="inspect-ext-status" class="badge"></span></div>
+          <div><strong>Requires Review:</strong> <span id="inspect-ext-review" style="font-weight: 600;"></span></div>
+          <div><strong>Pages:</strong> <span id="inspect-page-count"></span></div>
+        </div>
+
+        <!-- Fields Extraction & Grounding Table -->
+        <div style="margin-bottom: 16px;">
+          <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 6px;">Extracted &amp; Verified Fields:</div>
+          <div style="max-height: 240px; overflow-y: auto;">
+            <table id="inspect-fields-table">
+              <thead>
+                <tr><th>Field</th><th>Value (Norm)</th><th>Status</th><th>Source Evidence</th><th>Location</th></tr>
+              </thead>
+              <tbody id="inspect-fields-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Raw Text Preview (collapsible) -->
+        <details>
+          <summary style="font-size: 12px; font-weight: 600; color: var(--accent); cursor: pointer;">View Raw Extracted Text</summary>
+          <pre id="inspect-raw-text" class="json-box" style="margin-top: 8px; font-size: 11px;"></pre>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- TAB 3: INVOICES, PAYMENTS & RECORDS                                      -->
+<!-- ========================================================================= -->
+<div id="tab-invoices" class="tab-pane">
+  <div class="card">
+    <div class="card-title">
+      <span>Persistent Invoices (Simulated Company Database)</span>
+      <button class="btn btn-primary btn-sm" onclick="openRecordInvoiceModal()">+ Record New Invoice</button>
+    </div>
+
+    <!-- Filter Bar -->
+    <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+      <input type="text" id="inv-search-q" placeholder="Filter invoices by vendor or number..." style="max-width: 300px;" oninput="filterInvoicesTable()">
+      <select id="inv-status-filter" style="width: 140px;" onchange="filterInvoicesTable()">
+        <option value="">All Statuses</option>
+        <option value="Pending">Pending</option>
+        <option value="Approved">Approved</option>
+        <option value="Paid">Paid</option>
+        <option value="On Hold">On Hold</option>
+        <option value="Rejected">Rejected</option>
+      </select>
+    </div>
+
+    <table id="invoices-main-table">
+      <thead>
+        <tr><th>Record</th><th>Vendor</th><th>Invoice #</th><th class="num">Amount</th><th>Due Date</th><th>Status</th><th>Source Document</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="invoices-main-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Payments Table -->
+  <div class="card">
+    <div class="card-title">
+      <span>Payments (Consequential Financial Executions)</span>
+    </div>
+    <table id="payments-main-table">
+      <thead>
+        <tr><th>Payment ID</th><th>Invoice Record</th><th class="num">Amount</th><th>Status</th><th>Created (UTC)</th></tr>
+      </thead>
+      <tbody id="payments-main-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- TAB 4: RELIABILITY LAB & EXECUTION HISTORY                               -->
+<!-- ========================================================================= -->
+<div id="tab-reliability" class="tab-pane">
+  <!-- Fault Injection Demonstration Area -->
+  <div class="card">
+    <div class="card-title">
+      <span>Fault Injection &amp; Reliability Demonstrations</span>
+      <button class="btn btn-outline btn-sm" onclick="openAddFaultModal()">+ Add Custom Fault Rule</button>
+    </div>
+    <p style="font-size: 13px; color: var(--muted); margin-top: 0;">
+      Test how the Autonomous AI Task Worker handles transient network glitches and post-commit timeouts without duplicate writes.
+    </p>
+
+    <!-- Pre-built fault simulation actions -->
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+      <button class="btn btn-outline" onclick="demoScenario503()">
+        ⚡ Simulate HTTP 503 Before-Commit Retry (Wayne Invoice)
+      </button>
+      <button class="btn btn-outline" onclick="demoScenario504()">
+        ⚡ Simulate HTTP 504 After-Commit Reconciliation (Wayne Invoice)
+      </button>
+      <button class="btn btn-outline" onclick="demoPaymentGate()">
+        🔒 Test HMAC Governance Gate Enforcement
+      </button>
+      <button class="btn btn-outline" onclick="clearAllFaults()">
+        ✕ Clear All Faults
+      </button>
+    </div>
+
+    <!-- Active Faults Table -->
+    <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 6px;">Active Injected Fault Rules:</div>
+    <table id="faults-table">
+      <thead>
+        <tr><th>ID</th><th>Method</th><th>Path</th><th>Phase</th><th>Status</th><th>Times</th><th>Fired</th><th>Seen</th></tr>
+      </thead>
+      <tbody id="faults-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Session Task History -->
+  <div class="card">
+    <div class="card-title">
+      <span>Task Execution History (Current Session)</span>
+    </div>
+    <div style="max-height: 260px; overflow-y: auto;">
+      <table id="task-history-table">
+        <thead>
+          <tr><th>Time (UTC)</th><th>Action</th><th>Prompt</th><th>Status</th><th>Summary</th></tr>
+        </thead>
+        <tbody id="task-history-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- API Activity (Request Log) -->
+  <div class="card">
+    <div class="card-title">
+      <span>HTTP Request Log &amp; Fault Middleware (Latest 100 API Calls)</span>
+    </div>
+    <div style="max-height: 300px; overflow-y: auto;">
+      <table id="reqlog-table">
+        <thead>
+          <tr><th>Time (UTC)</th><th>Method</th><th>Path</th><th>Query</th><th>Status</th><th>Injected Fault</th></tr>
+        </thead>
+        <tbody id="reqlog-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- MODALS                                                                   -->
+<!-- ========================================================================= -->
+
+<!-- Record Invoice Modal -->
+<div id="modal-record-invoice" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Record Invoice</h3>
+      <button class="modal-close" onclick="closeModal('modal-record-invoice')">&times;</button>
+    </div>
+    <div class="form-group">
+      <label>Execution Mode:</label>
+      <select id="modal-inv-mode">
+        <option value="engine">Reliable OperationEngine (Check Dup + 503 Retry + 504 Reconcile + RAW Verify)</option>
+        <option value="direct_api">Direct Public API (POST /invoices with optional Idempotency-Key)</option>
+      </select>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Vendor:</label>
+        <input type="text" id="modal-inv-vendor" value="Wayne Enterprises">
+      </div>
+      <div class="form-group">
+        <label>Invoice Number:</label>
+        <input type="text" id="modal-inv-number" value="WE-2026-0412">
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Amount:</label>
+        <input type="number" step="0.01" id="modal-inv-amount" value="74250.00">
+      </div>
+      <div class="form-group">
+        <label>Currency:</label>
+        <select id="modal-inv-currency">
+          <option value="INR">INR</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Due Date (YYYY-MM-DD):</label>
+        <input type="date" id="modal-inv-due" value="2026-10-25">
+      </div>
+      <div class="form-group">
+        <label>Source Document:</label>
+        <input type="text" id="modal-inv-source" value="wayne_invoice_2026_09.pdf">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Idempotency Key (Optional custom key):</label>
+      <input type="text" id="modal-inv-idem" placeholder="Leave blank to use engine's deterministic SHA-256 key">
+    </div>
+    <div id="modal-inv-feedback" style="display: none; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 12px;"></div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn btn-outline" onclick="closeModal('modal-record-invoice')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitRecordInvoice()">Submit Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit / Patch Invoice Modal -->
+<div id="modal-edit-invoice" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Update Invoice <span id="modal-edit-rec-id"></span></h3>
+      <button class="modal-close" onclick="closeModal('modal-edit-invoice')">&times;</button>
+    </div>
+    <div class="form-group">
+      <label>Status:</label>
+      <select id="modal-edit-status">
+        <option value="Pending">Pending</option>
+        <option value="Approved">Approved</option>
+        <option value="On Hold">On Hold</option>
+        <option value="Rejected">Rejected</option>
+        <option value="Paid">Paid</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Due Date:</label>
+      <input type="date" id="modal-edit-due">
+    </div>
+    <div class="form-group">
+      <label>Amount:</label>
+      <input type="number" step="0.01" id="modal-edit-amount">
+    </div>
+    <div id="modal-edit-feedback" style="display: none; padding: 10px; border-radius: 6px; font-size: 12px; margin-bottom: 12px;"></div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn btn-outline" onclick="closeModal('modal-edit-invoice')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitPatchInvoice()">Save Changes (PATCH &amp; Verify)</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Fault Rule Modal -->
+<div id="modal-add-fault" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Inject HTTP Fault Rule</h3>
+      <button class="modal-close" onclick="closeModal('modal-add-fault')">&times;</button>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Method:</label>
+        <select id="modal-fault-method">
+          <option value="POST">POST</option>
+          <option value="GET">GET</option>
+          <option value="PATCH">PATCH</option>
+          <option value="*">* (All)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Path Pattern (Regex):</label>
+        <input type="text" id="modal-fault-path" value="/invoices">
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Fault Phase:</label>
+        <select id="modal-fault-phase">
+          <option value="before_commit">before_commit (Transient 503)</option>
+          <option value="after_commit">after_commit (504 Timeout after write)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>HTTP Status Code:</label>
+        <input type="number" id="modal-fault-status" value="503">
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Times to fire:</label>
+        <input type="number" id="modal-fault-times" value="2">
+      </div>
+      <div class="form-group">
+        <label>Delay (seconds):</label>
+        <input type="number" step="0.1" id="modal-fault-delay" value="0.0">
+      </div>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-fault')">Cancel</button>
+      <button class="btn btn-danger" onclick="submitAddFault()">Inject Fault Rule</button>
+    </div>
+  </div>
+</div>
+
+<!-- Create Sample Test Document Modal -->
+<div id="modal-create-doc" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Create Sample Document (Multi-Format Extraction Tester)</h3>
+      <button class="modal-close" onclick="closeModal('modal-create-doc')">&times;</button>
+    </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label>Filename (without ext):</label>
+        <input type="text" id="modal-doc-name" value="test_invoice_sample">
+      </div>
+      <div class="form-group">
+        <label>Format:</label>
+        <select id="modal-doc-fmt" onchange="updateDocTemplate()">
+          <option value="txt">TXT (Plain Text)</option>
+          <option value="json">JSON (Structured Data)</option>
+          <option value="csv">CSV (Tabular Data)</option>
+          <option value="xlsx">XLSX (Spreadsheet)</option>
+          <option value="docx">DOCX (Word Document)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Content:</label>
+      <textarea id="modal-doc-content" rows="6" style="font-family: monospace; font-size: 12px;"></textarea>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn btn-outline" onclick="closeModal('modal-create-doc')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCreateDoc()">Create &amp; Test Extraction</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- JAVASCRIPT CONTROLLER                                                    -->
+<!-- ========================================================================= -->
+<script>
+  let currentTaskResponse = null;
+  let activeInspectingRelPath = null;
+  let dashboardState = null;
+
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+  }
+
+  function setPrompt(txt) {
+    document.getElementById('task-prompt').value = txt;
+    document.getElementById('task-prompt').focus();
+  }
+
+  function openModal(id) { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+  // -------------------------------------------------------------------------
+  // Dashboard State Refresh & Synchronization
+  // -------------------------------------------------------------------------
+  async function refreshDashboardState() {
+    try {
+      const res = await fetch('/ui/api/state');
+      if (!res.ok) return;
+      dashboardState = await res.json();
+      renderInvoicesTable(dashboardState.invoices || []);
+      renderPaymentsTable(dashboardState.payments || []);
+      renderFaultsTable(dashboardState.faults || []);
+      renderReqLogTable(dashboardState.request_log || []);
+      renderTaskHistoryTable(dashboardState.task_history || []);
+      renderDocsTable(dashboardState.documents || []);
+    } catch (e) {
+      console.error('Failed refreshing dashboard state:', e);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 1: Task Runner
+  // -------------------------------------------------------------------------
+  async function runTask() {
+    const prompt = document.getElementById('task-prompt').value.trim();
+    if (!prompt) return;
+
+    const btn = document.getElementById('btn-run-task');
+    const spinner = document.getElementById('btn-run-spinner');
+    const timer = document.getElementById('task-timer');
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+    const t0 = performance.now();
+    timer.innerText = 'Executing...';
+
+    try {
+      const res = await fetch('/ui/api/tasks/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json();
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+      timer.innerText = `Finished in ${elapsed}s`;
+      renderTaskOutcome(data);
+      refreshDashboardState();
+    } catch (err) {
+      alert('Task execution error: ' + err);
+    } finally {
+      btn.disabled = false;
+      spinner.style.display = 'none';
+    }
+  }
+
+  function renderTaskOutcome(resp) {
+    currentTaskResponse = resp;
+    const cont = document.getElementById('task-result-container');
+    cont.style.display = 'block';
+
+    document.getElementById('res-task-id').innerText = resp.task_id || '';
+    const badge = document.getElementById('res-status-badge');
+    badge.className = 'badge ' + (resp.status || '');
+    badge.innerText = resp.status || 'UNKNOWN';
+
+    document.getElementById('res-summary-box').innerText = resp.summary || resp.answer || 'No summary returned.';
+
+    // Evidence
+    const evCont = document.getElementById('res-evidence-container');
+    const evBox = document.getElementById('res-evidence-box');
+    if (resp.evidence) {
+      evCont.style.display = 'block';
+      let html = `<div><strong>Source:</strong> ${resp.evidence.source_file || resp.evidence.source_document || '—'} (Page ${resp.evidence.page || 1}${resp.evidence.line ? ', Line ' + resp.evidence.line : ''})</div>`;
+      if (resp.evidence.snippet) html += `<div style="margin-top: 4px; font-family: monospace; color: #166534;">"${resp.evidence.snippet}"</div>`;
+      evBox.innerHTML = html;
+    } else {
+      evCont.style.display = 'none';
+    }
+
+    // Failures / Warnings
+    const failCont = document.getElementById('res-failures-container');
+    const failBox = document.getElementById('res-failures-box');
+    if (resp.failures && resp.failures.length > 0) {
+      failCont.style.display = 'block';
+      failBox.innerHTML = resp.failures.map(f => `<div>• <strong>[${f.category}]</strong> ${f.message}</div>`).join('');
+    } else {
+      failCont.style.display = 'none';
+    }
+
+    // Audit Steps
+    const auditList = document.getElementById('res-audit-list');
+    if (resp.audit_log && resp.audit_log.length > 0) {
+      auditList.innerHTML = resp.audit_log.map(step => `<li>${step}</li>`).join('');
+    } else {
+      auditList.innerHTML = `<li>Executed goal decomposition and verification pipeline successfully.</li>`;
+    }
+
+    document.getElementById('res-json-view').innerText = JSON.stringify(resp, null, 2);
+
+    // Clarification Handling
+    const clarCard = document.getElementById('clarification-card');
+    if (resp.status === 'needs_clarification') {
+      clarCard.style.display = 'block';
+      document.getElementById('clarification-prompt-text').innerText = resp.clarification_prompt || 'Multiple candidate invoices detected with ambiguous dates.';
+      const optList = document.getElementById('clarification-options-list');
+      optList.innerHTML = (resp.clarification_options || []).map(opt => `
+        <button class="chip active" onclick="document.getElementById('clarification-custom-input').value = '${opt}'">${opt}</button>
+      `).join('');
+      document.getElementById('clarification-custom-input').value = resp.clarification_options ? resp.clarification_options[0] : '';
+    } else {
+      clarCard.style.display = 'none';
+    }
+
+    // Approval Handling
+    const appCard = document.getElementById('approval-card');
+    if (resp.status === 'needs_approval') {
+      appCard.style.display = 'block';
+      document.getElementById('approval-prompt-text').innerText = resp.summary;
+      document.getElementById('approval-token-preview').innerText = resp.approval_token || '—';
+      const reqRole = (resp.approval_details && resp.approval_details.required_role) || 'supervisor';
+      document.getElementById('approval-role-select').value = reqRole;
+    } else {
+      appCard.style.display = 'none';
+    }
+  }
+
+  async function submitClarification() {
+    const sel = document.getElementById('clarification-custom-input').value.trim();
+    if (!sel || !currentTaskResponse) return;
+    try {
+      const res = await fetch('/ui/api/tasks/clarify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: currentTaskResponse.task_id, selected_option: sel }),
+      });
+      const data = await res.json();
+      renderTaskOutcome(data);
+      refreshDashboardState();
+    } catch (e) { alert('Clarification submission failed: ' + e); }
+  }
+
+  async function submitApproval(approved) {
+    if (!currentTaskResponse) return;
+    const role = document.getElementById('approval-role-select').value;
+    try {
+      const res = await fetch('/ui/api/tasks/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: currentTaskResponse.task_id,
+          approval_token: currentTaskResponse.approval_token,
+          approved: approved,
+          approver_role: role,
+        }),
+      });
+      const data = await res.json();
+      renderTaskOutcome(data);
+      refreshDashboardState();
+    } catch (e) { alert('Approval execution failed: ' + e); }
+  }
+
+  async function testApprovalBypass() {
+    if (!currentTaskResponse) return;
+    const det = currentTaskResponse.approval_details || { record_id: 'INV-1002', amount: 48200.00 };
+    try {
+      const res = await fetch('/ui/api/payments/test-bypass', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          record_id: det.record_id,
+          amount: det.amount,
+          scenario: 'forged_token',
+        }),
+      });
+      const data = await res.json();
+      alert(`Governance Gate Test Result:\nBlocked: ${data.blocked}\nException: ${data.exception_type}\nMessage: ${data.message}`);
+    } catch (e) { alert('Bypass test failed: ' + e); }
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 2: Documents & Extraction Lab
+  // -------------------------------------------------------------------------
+  let allDocuments = [];
+
+  function renderDocsTable(docs) {
+    allDocuments = docs;
+    filterDocsList();
+  }
+
+  function filterDocsList() {
+    const q = document.getElementById('docs-search-input').value.toLowerCase();
+    const folder = document.getElementById('docs-folder-filter').value.toLowerCase();
+    const tbody = document.getElementById('docs-tbody');
+
+    const filtered = allDocuments.filter(d => {
+      const matchesQ = !q || d.filename.toLowerCase().includes(q) || d.folder.toLowerCase().includes(q);
+      const matchesF = !folder || d.folder.toLowerCase() === folder;
+      return matchesQ && matchesF;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">No matching documents found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(d => `
+      <tr>
+        <td><strong>${d.filename}</strong></td>
+        <td><span class="badge">${d.folder}</span></td>
+        <td><code>.${d.format}</code></td>
+        <td class="num">${(d.size_bytes / 1024).toFixed(1)} KB</td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="inspectDocument('${d.rel_path}')">Inspect &amp; Verify</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  async function inspectDocument(relPath, customFields = null) {
+    activeInspectingRelPath = relPath;
+    document.getElementById('inspecting-file-name').innerText = relPath;
+    document.getElementById('inspecting-file-name').style.display = 'inline-flex';
+    document.getElementById('doc-inspect-empty').style.display = 'none';
+    document.getElementById('doc-inspect-content').style.display = 'block';
+    document.getElementById('inspect-download-link').href = `/ui/api/documents/download?rel_path=${encodeURIComponent(relPath)}`;
+
+    try {
+      const payload = { rel_path: relPath };
+      if (customFields) payload.requested_fields = customFields;
+      const res = await fetch('/ui/api/documents/inspect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        alert('Inspection failed: ' + data.error);
+        return;
+      }
+
+      const ext = data.extraction;
+      const statusBadge = document.getElementById('inspect-ext-status');
+      statusBadge.className = 'badge ' + ext.status;
+      statusBadge.innerText = ext.status.toUpperCase();
+      document.getElementById('inspect-ext-review').innerText = ext.requires_human_review ? 'Yes ⚠️' : 'No (Passed) ✓';
+      document.getElementById('inspect-page-count').innerText = data.pages ? data.pages.length : '1';
+
+      // Fields Table
+      const fieldsTbody = document.getElementById('inspect-fields-tbody');
+      const rows = [];
+      for (const [k, f] of Object.entries(ext.fields)) {
+        const val = f.normalized_value !== null ? f.normalized_value : (f.extracted_value !== null ? f.extracted_value : '<span class="muted">None</span>');
+        const issue = f.unresolved_issue ? `<div style="color: var(--danger); font-size: 11px;">${f.unresolved_issue}</div>` : '';
+        rows.push(`
+          <tr>
+            <td><strong>${k}</strong></td>
+            <td>${val}${issue}</td>
+            <td><span class="badge ${f.verification_status}">${f.verification_status}</span></td>
+            <td style="font-family: monospace; font-size: 11px;">${f.source_evidence || '—'}</td>
+            <td style="font-size: 11px;" class="muted">${f.source_location || '—'}</td>
+          </tr>
+        `);
+      }
+      fieldsTbody.innerHTML = rows.join('');
+
+      // Raw Text
+      document.getElementById('inspect-raw-text').innerText = data.raw_text || '(No text content)';
+    } catch (e) {
+      alert('Document inspection error: ' + e);
+    }
+  }
+
+  function reExtractCurrentDoc() {
+    if (!activeInspectingRelPath) return;
+    const custom = document.getElementById('inspect-custom-fields').value.split(',').map(s => s.trim()).filter(Boolean);
+    inspectDocument(activeInspectingRelPath, custom.length > 0 ? custom : null);
+  }
+
+  function openCreateDocModal() {
+    updateDocTemplate();
+    openModal('modal-create-doc');
+  }
+
+  function updateDocTemplate() {
+    const fmt = document.getElementById('modal-doc-fmt').value;
+    const area = document.getElementById('modal-doc-content');
+    if (fmt === 'txt') {
+      area.value = "Vendor: Acme Industrial Supplies\nInvoice Number: AC-CUSTOM-101\nInvoice Date: 2026-10-01\nDue Date: 2026-10-31\nSubtotal: INR 10,000.00\nGST (18%): INR 1,800.00\nTotal Due: INR 11,800.00\nPayment Terms: Net 30";
+    } else if (fmt === 'json') {
+      area.value = JSON.stringify({
+        vendor: "Globex Logistics",
+        invoice_number: "GX-CUSTOM-99",
+        invoice_date: "2026-09-15",
+        due_date: "2026-10-15",
+        subtotal: 50000.00,
+        tax: 9000.00,
+        total_amount: 59000.00,
+        currency: "INR",
+        payment_terms: "Net 30"
+      }, null, 2);
+    } else if (fmt === 'csv') {
+      area.value = "Item,Quantity,Unit_Price,Total\nConsulting Services,1,20000.00,20000.00\nVendor: Stark Industries,,\nInvoice Number: SI-CUSTOM-44,\nInvoice Date: 2026-08-10,\nDue Date: 2026-09-10,\nSubtotal: 20000.00,\nTax: 3600.00,\nTotal Amount: 23600.00,";
+    } else {
+      area.value = "Vendor: Meridian Partners\nInvoice Number: MP-2026-01\nDue Date: 2026-11-01\nTotal Amount: 15000.00";
+    }
+  }
+
+  async function submitCreateDoc() {
+    const name = document.getElementById('modal-doc-name').value.trim();
+    const fmt = document.getElementById('modal-doc-fmt').value;
+    const content = document.getElementById('modal-doc-content').value;
+    try {
+      const res = await fetch('/ui/api/documents/create-sample', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: name, format: fmt, content: content }),
+      });
+      const data = await res.json();
+      closeModal('modal-create-doc');
+      await refreshDashboardState();
+      inspectDocument(data.rel_path);
+    } catch (e) { alert('Create test document failed: ' + e); }
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 3: Invoices & Records
+  // -------------------------------------------------------------------------
+  let allInvoices = [];
+
+  function renderInvoicesTable(invs) {
+    allInvoices = invs;
+    filterInvoicesTable();
+  }
+
+  function filterInvoicesTable() {
+    const q = document.getElementById('inv-search-q').value.toLowerCase();
+    const st = document.getElementById('inv-status-filter').value;
+    const tbody = document.getElementById('invoices-main-tbody');
+
+    const filtered = allInvoices.filter(i => {
+      const matchesQ = !q || i.vendor.toLowerCase().includes(q) || i.invoice_number.toLowerCase().includes(q) || i.record_id.toLowerCase().includes(q);
+      const matchesS = !st || i.status.toLowerCase() === st.toLowerCase();
+      return matchesQ && matchesS;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">No invoice records matching criteria.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(i => `
+      <tr>
+        <td><strong><a href="/ui/invoices/${i.record_id}">${i.record_id}</a></strong></td>
+        <td>${i.vendor}</td>
+        <td>${i.invoice_number}</td>
+        <td class="num">${i.currency} ${Number(i.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td>${i.due_date}</td>
+        <td><span class="badge ${i.status}">${i.status}</span></td>
+        <td class="muted">${i.source_document || '—'}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="openEditInvoiceModal('${i.record_id}', '${i.status}', '${i.due_date}', ${i.amount})">Edit</button>
+          ${i.status !== 'Paid' ? `<button class="btn btn-outline btn-sm" onclick="requestPayInvoice('${i.record_id}')">Pay</button>` : ''}
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function renderPaymentsTable(pays) {
+    const tbody = document.getElementById('payments-main-tbody');
+    if (!pays || pays.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">No payment transactions recorded yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = pays.map(p => `
+      <tr>
+        <td><strong>${p.payment_id}</strong></td>
+        <td><a href="/ui/invoices/${p.record_id}">${p.record_id}</a></td>
+        <td class="num">${p.currency} ${Number(p.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+        <td><span class="badge ${p.status}">${p.status}</span></td>
+        <td class="muted">${p.created_at || '—'}</td>
+      </tr>
+    `).join('');
+  }
+
+  function openRecordInvoiceModal() {
+    document.getElementById('modal-inv-feedback').style.display = 'none';
+    openModal('modal-record-invoice');
+  }
+
+  async function submitRecordInvoice() {
+    const payload = {
+      mode: document.getElementById('modal-inv-mode').value,
+      vendor: document.getElementById('modal-inv-vendor').value.trim(),
+      invoice_number: document.getElementById('modal-inv-number').value.trim(),
+      amount: parseFloat(document.getElementById('modal-inv-amount').value),
+      currency: document.getElementById('modal-inv-currency').value,
+      due_date: document.getElementById('modal-inv-due').value,
+      source_document: document.getElementById('modal-inv-source').value.trim(),
+      idempotency_key: document.getElementById('modal-inv-idem').value.trim() || null,
+    };
+
+    const fb = document.getElementById('modal-inv-feedback');
+    try {
+      const res = await fetch('/ui/api/invoices/record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      fb.style.display = 'block';
+      if (data.ok) {
+        fb.style.background = '#f0fdf4';
+        fb.style.color = '#166534';
+        fb.innerHTML = `✓ Successfully recorded! Record ID: <strong>${data.record.record_id}</strong> (Verified Read-After-Write: ${data.read_after_write_verified})`;
+        refreshDashboardState();
+      } else {
+        fb.style.background = '#fef2f2';
+        fb.style.color = '#991b1b';
+        fb.innerHTML = `✗ Error: ${data.error ? (typeof data.error === 'object' ? JSON.stringify(data.error) : data.error) : 'Operation failed'}`;
+      }
+    } catch (e) {
+      alert('Record invoice request failed: ' + e);
+    }
+  }
+
+  let editingRecordId = null;
+  function openEditInvoiceModal(recId, status, dueDate, amount) {
+    editingRecordId = recId;
+    document.getElementById('modal-edit-rec-id').innerText = recId;
+    document.getElementById('modal-edit-status').value = status;
+    document.getElementById('modal-edit-due').value = dueDate;
+    document.getElementById('modal-edit-amount').value = amount;
+    document.getElementById('modal-edit-feedback').style.display = 'none';
+    openModal('modal-edit-invoice');
+  }
+
+  async function submitPatchInvoice() {
+    if (!editingRecordId) return;
+    const payload = {
+      status: document.getElementById('modal-edit-status').value,
+      due_date: document.getElementById('modal-edit-due').value,
+      amount: parseFloat(document.getElementById('modal-edit-amount').value),
+    };
+    const fb = document.getElementById('modal-edit-feedback');
+    try {
+      const res = await fetch(`/ui/api/invoices/${editingRecordId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      fb.style.display = 'block';
+      if (data.ok) {
+        fb.style.background = '#f0fdf4';
+        fb.style.color = '#166534';
+        fb.innerHTML = `✓ Successfully updated ${editingRecordId} (Read-after-write verified: ${data.read_after_write_verified})`;
+        refreshDashboardState();
+      } else {
+        fb.style.background = '#fef2f2';
+        fb.style.color = '#991b1b';
+        fb.innerHTML = `✗ Error: ${data.error ? JSON.stringify(data.error) : 'Update rejected'}`;
+      }
+    } catch (e) { alert('Update invoice failed: ' + e); }
+  }
+
+  async function requestPayInvoice(recId) {
+    switchTab('tab-runner');
+    setPrompt(`Pay the invoice ${recId}.`);
+    await runTask();
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab 4: Reliability Lab & Fault Scenarios
+  // -------------------------------------------------------------------------
+  function renderFaultsTable(faults) {
+    const tbody = document.getElementById('faults-tbody');
+    if (!faults || faults.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">No active fault injection rules.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = faults.map(f => `
+      <tr>
+        <td><strong>${f.fault_id}</strong></td>
+        <td><code>${f.method}</code></td>
+        <td><code>${f.path}</code></td>
+        <td><span class="badge ${f.phase === 'before_commit' ? 'needs_approval' : 'fault'}">${f.phase}</span></td>
+        <td>${f.status_code}</td>
+        <td>${f.times !== null ? f.times : '∞'}</td>
+        <td>${f.fired}</td>
+        <td>${f.seen}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderReqLogTable(rows) {
+    const tbody = document.getElementById('reqlog-tbody');
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">No HTTP requests logged yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td class="muted">${r.ts || ''}</td>
+        <td><strong>${r.method}</strong></td>
+        <td>${r.path}</td>
+        <td class="muted">${r.query || ''}</td>
+        <td><span class="badge ${r.status_code >= 400 ? 'fault' : 'completed'}">${r.status_code}</span></td>
+        <td>${r.fault_id ? `<span class="badge fault">${r.fault_id} · ${r.fault_phase}</span>` : '—'}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderTaskHistoryTable(tasks) {
+    const tbody = document.getElementById('task-history-tbody');
+    if (!tasks || tasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">No tasks executed in this session yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = tasks.map(t => `
+      <tr>
+        <td class="muted">${t.timestamp || ''}</td>
+        <td><code>${t.action}</code></td>
+        <td>${t.prompt}</td>
+        <td><span class="badge ${t.status}">${t.status}</span></td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t.summary}</td>
+      </tr>
+    `).join('');
+  }
+
+  function openAddFaultModal() { openModal('modal-add-fault'); }
+
+  async function submitAddFault() {
+    const spec = {
+      method: document.getElementById('modal-fault-method').value,
+      path: document.getElementById('modal-fault-path').value.trim(),
+      phase: document.getElementById('modal-fault-phase').value,
+      status_code: parseInt(document.getElementById('modal-fault-status').value, 10),
+      times: parseInt(document.getElementById('modal-fault-times').value, 10),
+      delay_s: parseFloat(document.getElementById('modal-fault-delay').value),
+    };
+    try {
+      await fetch('/ui/api/faults', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(spec),
+      });
+      closeModal('modal-add-fault');
+      refreshDashboardState();
+    } catch (e) { alert('Add fault failed: ' + e); }
+  }
+
+  async function clearAllFaults() {
+    try {
+      await fetch('/ui/api/faults', { method: 'DELETE' });
+      refreshDashboardState();
+    } catch (e) { alert('Clear faults failed: ' + e); }
+  }
+
+  async function demoScenario503() {
+    await clearAllFaults();
+    await fetch('/ui/api/faults', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'POST',
+        path: '/invoices',
+        phase: 'before_commit',
+        status_code: 503,
+        times: 2,
+        detail: 'Injected transient 503 before commit'
+      }),
+    });
+    switchTab('tab-runner');
+    setPrompt('Find the latest invoice from Wayne Enterprises and record it in the finance system.');
+    await runTask();
+  }
+
+  async function demoScenario504() {
+    await clearAllFaults();
+    await fetch('/ui/api/faults', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'POST',
+        path: '/invoices',
+        phase: 'after_commit',
+        status_code: 504,
+        times: 1,
+        detail: 'Injected 504 gateway timeout after commit'
+      }),
+    });
+    switchTab('tab-runner');
+    setPrompt('Find the latest invoice from Wayne Enterprises and record it in the finance system.');
+    await runTask();
+  }
+
+  async function demoPaymentGate() {
+    switchTab('tab-runner');
+    setPrompt('Pay the Globex invoice INV-1002.');
+    await runTask();
+  }
+
+  async function resetEnvironment() {
+    if (!confirm('Reset SQLite database to seed state and clear all faults?')) return;
+    try {
+      await fetch('/ui/api/reset', { method: 'POST' });
+      document.getElementById('task-result-container').style.display = 'none';
+      await refreshDashboardState();
+      alert('Environment successfully reset to seed state.');
+    } catch (e) { alert('Reset failed: ' + e); }
+  }
+
+  // Initial load
+  document.addEventListener('DOMContentLoaded', () => {
+    refreshDashboardState();
+  });
+</script>
+{% endblock %}

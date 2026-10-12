@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>API activity (latest 200 requests)</h2>
+{% if rows %}
+<table>
+  <tr><th>Time (UTC)</th><th>Method</th><th>Path</th><th>Query</th><th>Status</th><th>Injected fault</th></tr>
+  {% for r in rows %}
+  <tr><td class="muted">{{ r.ts }}</td><td>{{ r.method }}</td><td>{{ r.path }}</td><td class="muted">{{ r.query or "" }}</td>
+      <td>{{ r.status_code }}</td>
+      <td>{% if r.fault_id %}<span class="badge fault">{{ r.fault_id }} · {{ r.fault_phase }}</span>{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<div class="empty">No API requests yet.</div>{% endif %}
+{% endblock %}

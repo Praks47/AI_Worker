@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ inv.record_id }}{% endblock %}
+{% block content %}
+<h2>{{ inv.record_id }} · {{ inv.vendor }}</h2>
+<dl>
+  <dt>Invoice number</dt><dd>{{ inv.invoice_number }}</dd>
+  <dt>Amount</dt><dd>{{ inv.currency }} {{ "{:,.2f}".format(inv.amount) }}</dd>
+  <dt>Due date</dt><dd>{{ inv.due_date }}</dd>
+  <dt>Status</dt><dd><span class="badge {{ inv.status }}">{{ inv.status }}</span></dd>
+  <dt>Source document</dt>
+  <dd>{% if doc_id %}<a href="/documents/{{ doc_id }}/file">{{ inv.source_document }}</a>{% else %}{{ inv.source_document or "—" }}{% endif %}</dd>
+  <dt>Created</dt><dd>{{ inv.created_at }}</dd>
+  <dt>Last updated</dt><dd>{{ inv.updated_at }}</dd>
+</dl>
+<h2>Payments</h2>
+{% if payments %}
+<table><tr><th>Payment</th><th class="num">Amount</th><th>Status</th><th>Created</th></tr>
+  {% for p in payments %}<tr><td>{{ p.payment_id }}</td><td class="num">{{ p.currency }} {{ "{:,.2f}".format(p.amount) }}</td>
+  <td><span class="badge {{ p.status }}">{{ p.status }}</span></td><td class="muted">{{ p.created_at }}</td></tr>{% endfor %}
+</table>
+{% else %}<div class="empty">No payments for this invoice.</div>{% endif %}
+{% endblock %}
