@@ -137,9 +137,22 @@ class FinanceClient:
         self,
         record_id: str,
         amount: float,
+        approval_token: Optional[str] = None,
+        approver_role: Optional[str] = None,
     ) -> Dict[str, Any]:
+        headers: Dict[str, str] = {}
+        if approval_token:
+            headers["X-Approval-Token"] = approval_token
+        if approver_role:
+            headers["X-Approver-Role"] = approver_role
         payload: Dict[str, Any] = {
             "record_id": record_id,
             "amount": float(amount),
         }
-        return self._request("POST", "/payments", json_body=payload)
+        if approval_token:
+            payload["approval_token"] = approval_token
+        if approver_role:
+            payload["approver_role"] = approver_role
+        return self._request("POST", "/payments", json_body=payload, headers=headers)
+
+

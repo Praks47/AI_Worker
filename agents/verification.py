@@ -488,9 +488,17 @@ class PaymentApprovalGate:
     """
 
     MANAGER_THRESHOLD = Decimal("50000.00")
+    AUTHORIZED_ROLES = {"supervisor", "finance_manager"}
 
     def __init__(self, secret_key: Optional[bytes] = None, ttl_seconds: int = 3600):
-        self._secret = secret_key or secrets.token_bytes(32)
+        if secret_key is not None:
+            self._secret = secret_key
+        else:
+            try:
+                from company_env import config as env_config
+                self._secret = env_config.payment_gate_secret()
+            except Exception:
+                self._secret = b"centreai-gov-gate-shared-hmac-secret-v1"
         self._ttl_seconds = ttl_seconds
         self._used_nonces: Set[str] = set()
 
@@ -525,7 +533,7 @@ class PaymentApprovalGate:
         sig = hmac.new(self._secret, b64_payload.encode("ascii"), hashlib.sha256).hexdigest()
         return f"{b64_payload}.{sig}"
 
-    def verify_and_consume(
+    def verify_token(
         self,
         token: Optional[str],
         record_id: str,
@@ -534,10 +542,7 @@ class PaymentApprovalGate:
         expected_scope: str = "payment_submit",
         approver_role: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Verify HMAC signature, payload binding, expiration, role, and replay protection.
-
-        Fails closed by raising GovernanceViolationError on any discrepancy.
-        """
+        """Verify HMAC signature, payload binding, expiration, and role without consuming nonce."""
         if not token or "." not in token:
             raise GovernanceViolationError("Blocked by Governance Gate: missing or malformed approval token")
 
@@ -553,10 +558,6 @@ class PaymentApprovalGate:
 
         if int(time.time()) > int(payload.get("exp", 0)):
             raise GovernanceViolationError("Blocked by Governance Gate: approval token has expired")
-
-        nonce = payload.get("nonce")
-        if not nonce or nonce in self._used_nonces:
-            raise GovernanceViolationError("Blocked by Governance Gate: replay detected (approval token already consumed)")
 
         if payload.get("scope") != expected_scope:
             raise GovernanceViolationError(
@@ -576,10 +577,49 @@ class PaymentApprovalGate:
             )
 
         req_role = payload.get("required_role", "supervisor")
-        if req_role == "finance_manager" and approver_role not in (None, "finance_manager"):
-            raise GovernanceViolationError(
-                f"Blocked by Governance Gate: Policy 3.b requires 'finance_manager' approval for amounts >= 50,000 (got '{approver_role}')"
-            )
+        if approver_role is not None:
+            if approver_role not in self.AUTHORIZED_ROLES:
+                raise GovernanceViolationError(
+                    f"Blocked by Governance Gate: invalid approver role '{approver_role}'. Authorized roles: {self.AUTHORIZED_ROLES}"
+                )
+            if req_role == "finance_manager" and approver_role != "finance_manager":
+                raise GovernanceViolationError(
+                    f"Blocked by Governance Gate: Policy 3.b requires 'finance_manager' approval for amounts >= 50,000 (got '{approver_role}')"
+                )
+        else:
+            if req_role == "finance_manager":
+                raise GovernanceViolationError(
+                    "Blocked by Governance Gate: Policy 3.b requires 'finance_manager' approval for amounts >= 50,000 (got None)"
+                )
+
+        return payload
+
+    def verify_and_consume(
+        self,
+        token: Optional[str],
+        record_id: str,
+        amount: float | Decimal,
+        currency: str = "INR",
+        expected_scope: str = "payment_submit",
+        approver_role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Verify HMAC signature, payload binding, expiration, role, and replay protection.
+
+        Fails closed by raising GovernanceViolationError on any discrepancy.
+        """
+        payload = self.verify_token(
+            token=token,
+            record_id=record_id,
+            amount=amount,
+            currency=currency,
+            expected_scope=expected_scope,
+            approver_role=approver_role,
+        )
+
+        nonce = payload.get("nonce")
+        if not nonce or nonce in self._used_nonces:
+            raise GovernanceViolationError("Blocked by Governance Gate: replay detected (approval token already consumed)")
 
         self._used_nonces.add(nonce)
         return payload
+

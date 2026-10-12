@@ -216,7 +216,12 @@ class OperationEngine:
         reconciled = False
         try:
             resp = execute_with_retry(
-                lambda: self.client.create_payment(record_id=record_id, amount=float(amount)),
+                lambda: self.client.create_payment(
+                    record_id=record_id,
+                    amount=float(amount),
+                    approval_token=approval_token,
+                    approver_role=approver_role,
+                ),
                 policy=self.policy,
                 operation_name=f"create_payment({record_id})",
                 audit_log=self.audit_log,

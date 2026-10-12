@@ -56,6 +56,10 @@ class PaymentCreate(BaseModel):
 
     record_id: str
     amount: float = Field(gt=0)
+    approval_token: str | None = None
+    approver_role: str | None = None
+
+
 
 
 class PaymentOut(BaseModel):

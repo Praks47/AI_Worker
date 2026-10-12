@@ -45,7 +45,14 @@ CREATE TABLE IF NOT EXISTS request_log (
     fault_id    TEXT,
     fault_phase TEXT
 );
+CREATE TABLE IF NOT EXISTS consumed_approval_tokens (
+    nonce       TEXT PRIMARY KEY,
+    record_id   TEXT NOT NULL,
+    amount      REAL NOT NULL,
+    consumed_at TEXT NOT NULL
+);
 """
+
 
 # Records that already exist in the finance system before any task runs.
 # (vendor, invoice_number, amount, currency, due_date, source_document, status)
@@ -120,10 +127,12 @@ def reset_db(conn: sqlite3.Connection) -> None:
     """Drop everything and re-seed. Used by setup script, tests and the admin API."""
     conn.executescript(
         "DROP TABLE IF EXISTS payments; DROP TABLE IF EXISTS idempotency_keys;"
-        "DROP TABLE IF EXISTS request_log; DROP TABLE IF EXISTS invoices;"
+        "DROP TABLE IF EXISTS request_log; DROP TABLE IF EXISTS consumed_approval_tokens;"
+        "DROP TABLE IF EXISTS invoices;"
     )
     init_db(conn)
     seed(conn)
+
 
 
 def ensure_db() -> None:

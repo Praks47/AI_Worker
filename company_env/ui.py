@@ -189,7 +189,9 @@ class DirectEnvClient:
 
             if method == "POST" and path == "/payments":
                 body = PaymentCreate.model_validate(json_body or {})
-                data = public_api.create_payment(body=body, conn=conn)
+                tok = headers.get("x-approval-token") or getattr(body, "approval_token", None)
+                role = headers.get("x-approver-role") or getattr(body, "approver_role", None)
+                data = public_api.create_payment(body=body, x_approval_token=tok, x_approver_role=role, conn=conn)
                 return _SimResponse(201, data)
 
             return _SimResponse(404, {"error": "not_found", "detail": f"Unknown endpoint {method} {path}"})

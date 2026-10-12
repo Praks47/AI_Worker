@@ -14,8 +14,11 @@ from .deps import get_db, get_store
 from .documents import DocumentStore
 from .errors import ApiError
 from .models import InvoiceCreate, InvoiceOut, InvoiceUpdate, PaymentCreate, PaymentOut
+from agents.reliability import GovernanceViolationError
+from agents.verification import PaymentApprovalGate
 
 router = APIRouter()
+
 
 
 # --------------------------------------------------------------- documents
@@ -136,8 +139,17 @@ def update_invoice(record_id: str, body: InvoiceUpdate, conn=Depends(get_db)):
 
 # ---------------------------------------------------------------- payments
 @router.post("/payments", response_model=PaymentOut, status_code=201)
-def create_payment(body: PaymentCreate, conn=Depends(get_db)):
-    """Submit a payment. CONSEQUENTIAL and irreversible: marks the invoice Paid."""
+def create_payment(body: PaymentCreate,
+                   x_approval_token: str | None = Header(default=None, alias="X-Approval-Token"),
+                   x_approver_role: str | None = Header(default=None, alias="X-Approver-Role"),
+                   conn=Depends(get_db)):
+    """Submit a payment. Gated by cryptographic HMAC approval verification."""
+    token = x_approval_token or body.approval_token
+    if not token:
+        raise ApiError(403, "forbidden", "Payment execution blocked: missing HMAC approval token")
+
+    role = x_approver_role or body.approver_role
+
     inv = _invoice_or_404(conn, body.record_id)
     if inv["status"] == "Paid":
         raise ApiError(409, "already_paid", f"{body.record_id} has already been paid")
@@ -146,13 +158,42 @@ def create_payment(body: PaymentCreate, conn=Depends(get_db)):
     if round(body.amount, 2) != inv["amount"]:
         raise ApiError(422, "amount_mismatch",
                        f"Payment amount {body.amount} does not match invoice amount {inv['amount']}")
+
+    # Cryptographic verification of approval token bound to this transaction
+    gate = PaymentApprovalGate()
+    try:
+        payload = gate.verify_token(
+            token=token,
+            record_id=body.record_id,
+            amount=body.amount,
+            currency=inv["currency"],
+            expected_scope="payment_submit",
+            approver_role=role,
+        )
+    except GovernanceViolationError as exc:
+        raise ApiError(403, "forbidden", f"Payment execution blocked by governance gate: {exc}")
+
+    # Replay protection at database boundary
+    nonce = payload.get("nonce")
+    if not nonce:
+        raise ApiError(403, "forbidden", "Payment execution blocked: malformed token nonce")
+
+    row = conn.execute("SELECT nonce FROM consumed_approval_tokens WHERE nonce=?", (nonce,)).fetchone()
+    if row:
+        raise ApiError(403, "forbidden", "Payment execution blocked: approval token already consumed (replay detected)")
+
     payment_id = db.insert_payment(conn, record_id=body.record_id, amount=body.amount,
                                    currency=inv["currency"])
     conn.execute("UPDATE invoices SET status='Paid', updated_at=? WHERE record_id=?",
                  (db.utcnow(), body.record_id))
+    conn.execute(
+        "INSERT INTO consumed_approval_tokens (nonce, record_id, amount, consumed_at) VALUES (?,?,?,?)",
+        (nonce, body.record_id, body.amount, db.utcnow()),
+    )
     conn.commit()
     return dict(conn.execute("SELECT payment_id, record_id, amount, currency, status, created_at "
                              "FROM payments WHERE payment_id=?", (payment_id,)).fetchone())
+
 
 
 @router.get("/payments")

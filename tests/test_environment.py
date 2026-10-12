@@ -119,15 +119,22 @@ def test_request_log_marks_injected_faults(client):
 
 # ------------------------------------------------------------------- payments
 def test_payment_marks_invoice_paid_and_cannot_repeat(client):
-    r = client.post("/payments", json={"record_id": "INV-1002", "amount": 48200.00})
+    from agents.verification import PaymentApprovalGate
+    gate = PaymentApprovalGate()
+    tok1 = gate.issue_approval_request_token("test-env-1", "INV-1002", 48200.00, "INR")
+    r = client.post("/payments", json={"record_id": "INV-1002", "amount": 48200.00}, headers={"X-Approval-Token": tok1})
     assert r.status_code == 201
     assert client.get("/invoices/INV-1002").json()["status"] == "Paid"
-    again = client.post("/payments", json={"record_id": "INV-1002", "amount": 48200.00})
+    tok2 = gate.issue_approval_request_token("test-env-2", "INV-1002", 48200.00, "INR")
+    again = client.post("/payments", json={"record_id": "INV-1002", "amount": 48200.00}, headers={"X-Approval-Token": tok2})
     assert again.status_code == 409 and again.json()["error"] == "already_paid"
 
 
 def test_payment_amount_must_match(client):
-    r = client.post("/payments", json={"record_id": "INV-1002", "amount": 1.0})
+    from agents.verification import PaymentApprovalGate
+    gate = PaymentApprovalGate()
+    tok = gate.issue_approval_request_token("test-env-3", "INV-1002", 1.0, "INR")
+    r = client.post("/payments", json={"record_id": "INV-1002", "amount": 1.0}, headers={"X-Approval-Token": tok})
     assert r.status_code == 422 and r.json()["error"] == "amount_mismatch"
     assert db_inspect.payments()[-1]["record_id"] != "INV-1002"
 

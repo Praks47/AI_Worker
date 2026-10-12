@@ -260,7 +260,36 @@ class AgentOrchestrator:
                 answer=msg,
             )
 
-        effective_role = approver_role or PaymentApprovalGate.required_role(amount)
+        # Enforce separation of duties and approval thresholds
+        if approver_role is not None and approver_role not in PaymentApprovalGate.AUTHORIZED_ROLES:
+            msg = f"Approval rejected: invalid approver role '{approver_role}'. Authorized roles: {PaymentApprovalGate.AUTHORIZED_ROLES}."
+            return OrchestratorResponse(
+                task_id=task_id,
+                status=TaskStatus.FAILED,
+                success=False,
+                summary=msg,
+                answer=msg,
+            )
+
+        req_role = PaymentApprovalGate.required_role(amount)
+        if req_role == "finance_manager":
+            if approver_role != "finance_manager":
+                msg = (
+                    f"Approval rejected: Policy 3.b requires 'finance_manager' authorization "
+                    f"for amounts >= 50,000 (got '{approver_role or 'none'}'). "
+                    f"Supervisor or missing role cannot authorize high-value payments."
+                )
+                return OrchestratorResponse(
+                    task_id=task_id,
+                    status=TaskStatus.FAILED,
+                    success=False,
+                    summary=msg,
+                    answer=msg,
+                )
+            effective_role = "finance_manager"
+        else:
+            effective_role = approver_role or "supervisor"
+
         try:
             res = self.engine.execute_payment(
                 record_id=record_id,

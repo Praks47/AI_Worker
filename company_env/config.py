@@ -35,3 +35,10 @@ def enforce_unique_invoice() -> bool:
     *agent* must detect duplicates itself.
     """
     return os.environ.get("COMPANY_ENV_ENFORCE_UNIQUE", "0") == "1"
+
+
+def payment_gate_secret() -> bytes:
+    """Shared HMAC secret key for the PaymentApprovalGate and /payments boundary."""
+    val = os.environ.get("COMPANY_ENV_PAYMENT_SECRET", "centreai-gov-gate-shared-hmac-secret-v1")
+    return val.encode("utf-8")
+
