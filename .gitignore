@@ -9,8 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-data/finance.db
-data/finance.db-journal
+data/
+
 __pycache__/
 .pytest_cache/
 .venv/

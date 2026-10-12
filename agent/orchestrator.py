@@ -138,11 +138,45 @@ class AgentOrchestrator:
             resp.audit_log.insert(0, audit_note)
             return resp
 
-        # 7. Categories A, B, C, D: Invoice extraction, verification, and recording (Mutating)
-        resp = self._handle_invoice_workflow(task_id, request, plan=plan)
-        resp.execution_trace = plan.execution_trace
-        resp.audit_log.insert(0, audit_note)
-        return resp
+        # 7. Explicit Invoice Recording (Mutating)
+        if plan.intent == TaskIntent.RECORD_INVOICE:
+            # Defense-in-depth safety: if user instruction explicitly prohibits mutation, refuse to write to database
+            if re.search(
+                r"\b(do not|don'?t|never|without)\s+(record|modify|write|create|save|insert|enter)\b",
+                request,
+                re.IGNORECASE,
+            ) or re.search(
+                r"\b(view\s+only|read[\s\-]only|check\s+only|inspect\s+only)\b",
+                request,
+                re.IGNORECASE,
+            ):
+                msg = "Instruction explicitly prohibits recording or database mutation. Refusing to modify records."
+                return OrchestratorResponse(
+                    task_id=task_id,
+                    status=TaskStatus.COMPLETED,
+                    success=True,
+                    summary=msg,
+                    answer=msg,
+                    audit_log=[audit_note],
+                    execution_trace=plan.execution_trace,
+                )
+
+            resp = self._handle_invoice_workflow(task_id, request, plan=plan)
+            resp.execution_trace = plan.execution_trace
+            resp.audit_log.insert(0, audit_note)
+            return resp
+
+        # 8. Unrecognized or Unsupported Intent (Fail-closed default)
+        msg = f"Task intent '{plan.intent}' is unsupported. Refusing to perform state changes."
+        return OrchestratorResponse(
+            task_id=task_id,
+            status=TaskStatus.FAILED,
+            success=False,
+            summary=msg,
+            answer=msg,
+            audit_log=[audit_note],
+            execution_trace=plan.execution_trace,
+        )
 
     def resume_with_clarification(
         self, task_id: str, selected_option: str

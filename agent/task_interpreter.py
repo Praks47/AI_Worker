@@ -113,10 +113,12 @@ INJECTION_PATTERNS = [
     r"disregard\s+(all\s+|previous\s+|prior\s+)?rules",
     r"system\s*override",
     r"you\s+are\s+now\s+(in\s+)?developer\s+mode",
-    r"bypass\s+(all\s+)?(security|policy|approval|verification)",
+    r"bypass\s+(all\s+)?(the\s+)?(approval|workflow|security|policy|verification)",
+    r"cfo\s+(has\s+|already\s+)?approved.*bypass",
     r"exfiltrate",
     r"transfer\s+all\s+funds",
     r"drop\s+table",
+    r"delete\s+all\s+(invoice\s+)?records",
 ]
 
 
@@ -247,6 +249,16 @@ class GroqTaskInterpreter:
             plan.is_mutating = False
         elif plan.intent in (TaskIntent.RECORD_INVOICE, TaskIntent.PAYMENT_REQUEST):
             plan.is_mutating = True
+
+        # Low-confidence safeguard: never execute mutating actions when confidence < 0.5
+        if plan.confidence < 0.5:
+            if plan.intent in (TaskIntent.RECORD_INVOICE, TaskIntent.PAYMENT_REQUEST):
+                plan.intent = TaskIntent.CLARIFICATION_REQUIRED
+                plan.is_mutating = False
+                plan.clarification_prompt = (
+                    f"Confidence ({plan.confidence:.2f}) is too low to perform mutating action. "
+                    "Please clarify or confirm the requested operation."
+                )
 
         # Assemble full execution trace (never exposes credentials)
         plan.execution_trace = {
