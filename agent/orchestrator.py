@@ -10,6 +10,12 @@ import uuid
 from agent.finance.finance_client import FinanceClient
 from agent.finance.operation_engine import FinanceTools, OperationEngine
 from agent.finance.reliability import ReliabilityPolicy
+from agent.task_interpreter import (
+    GroqTaskInterpreter,
+    TaskIntent,
+    TaskInterpretationError,
+    TaskPlan,
+)
 from agents.extractor import (
     discover_files,
     extract_fields,
@@ -30,6 +36,7 @@ class AgentOrchestrator:
     """End-to-end orchestrator integrating Document Reading (Category A),
     Record Management (Category B), Cross-Document Workflows (Category C),
     Fault Handling & Investigation (Category D), and Governed Payments (Category E).
+    Uses genuine LLM task interpretation via Groq API.
     """
 
     def __init__(
@@ -37,6 +44,7 @@ class AgentOrchestrator:
         finance_client: Optional[FinanceClient] = None,
         documents_dir: Optional[Path] = None,
         policy: Optional[ReliabilityPolicy] = None,
+        interpreter: Optional[GroqTaskInterpreter] = None,
     ):
         self.client = finance_client or FinanceClient()
         self.policy = policy or ReliabilityPolicy()
@@ -49,6 +57,7 @@ class AgentOrchestrator:
         self.finance_tools = FinanceTools(engine=self.engine)
         self._explicit_docs_dir = documents_dir
         self._tasks: Dict[str, Dict[str, Any]] = {}
+        self.interpreter = interpreter or GroqTaskInterpreter()
 
     def _get_documents_dir(self) -> Path:
         if self._explicit_docs_dir is not None:
@@ -60,19 +69,80 @@ class AgentOrchestrator:
     # ------------------------------------------------------------------
     def run(self, request: str) -> OrchestratorResponse:
         task_id = f"task-{uuid.uuid4().hex[:8]}"
-        req_lower = request.lower().strip()
 
-        # 1. Category E: Payment / Governed Action
-        if re.search(r"\b(pay|settle|remit)\b", req_lower):
-            return self._handle_payment_request(task_id, request)
+        # 1. Genuine LLM Task Interpretation
+        plan = self.interpreter.interpret(request)
+        model_name = (
+            plan.execution_trace.get("model", "qwen/qwen3.8-27b")
+            if plan.execution_trace
+            else "groq"
+        )
+        audit_note = (
+            f"LLM Interpretation (Groq/{model_name}): "
+            f"Intent={plan.intent.value}, Mutating={plan.is_mutating}, "
+            f"Vendor={plan.target_vendor or 'None'}, Focus={plan.query_focus or 'None'}"
+        )
 
-        # 2. Category A: Contract expiry or non-invoice information retrieval
-        if "contract" in req_lower or "expire" in req_lower or "msa" in req_lower or "policy" in req_lower:
-            if "record" not in req_lower:
-                return self._handle_contract_query(task_id, request)
+        # 2. Unsupported task or Security Refusal (Prompt Injection Defense)
+        if plan.intent == TaskIntent.UNSUPPORTED_TASK:
+            msg = (
+                plan.refusal_reason
+                or plan.reasoning
+                or "Task is unsupported or violates security guardrails."
+            )
+            return OrchestratorResponse(
+                task_id=task_id,
+                status=TaskStatus.FAILED,
+                success=False,
+                summary=msg,
+                answer=msg,
+                audit_log=[audit_note],
+                execution_trace=plan.execution_trace,
+            )
 
-        # 3. Categories A, B, C, D: Invoice extraction, verification, and recording
-        return self._handle_invoice_workflow(task_id, request)
+        # 3. Clarification Required
+        if plan.intent == TaskIntent.CLARIFICATION_REQUIRED:
+            prompt = (
+                plan.clarification_prompt
+                or "Your instruction is ambiguous or missing essential details. Please clarify."
+            )
+            return OrchestratorResponse(
+                task_id=task_id,
+                status=TaskStatus.NEEDS_CLARIFICATION,
+                success=False,
+                summary=prompt,
+                answer=prompt,
+                clarification_prompt=prompt,
+                audit_log=[audit_note],
+                execution_trace=plan.execution_trace,
+            )
+
+        # 4. Category E: Payment / Governed Action (Mutating, Gated)
+        if plan.intent == TaskIntent.PAYMENT_REQUEST:
+            resp = self._handle_payment_request(task_id, request, plan=plan)
+            resp.execution_trace = plan.execution_trace
+            resp.audit_log.insert(0, audit_note)
+            return resp
+
+        # 5. Category A: Contract & Agreement Query (Read-Only)
+        if plan.intent == TaskIntent.CONTRACT_QUERY:
+            resp = self._handle_contract_query(task_id, request, plan=plan)
+            resp.execution_trace = plan.execution_trace
+            resp.audit_log.insert(0, audit_note)
+            return resp
+
+        # 6. Read-Only Invoice Information Retrieval (Read-Only)
+        if plan.intent == TaskIntent.INVOICE_QUERY:
+            resp = self._handle_invoice_query(task_id, request, plan=plan)
+            resp.execution_trace = plan.execution_trace
+            resp.audit_log.insert(0, audit_note)
+            return resp
+
+        # 7. Categories A, B, C, D: Invoice extraction, verification, and recording (Mutating)
+        resp = self._handle_invoice_workflow(task_id, request, plan=plan)
+        resp.execution_trace = plan.execution_trace
+        resp.audit_log.insert(0, audit_note)
+        return resp
 
     def resume_with_clarification(
         self, task_id: str, selected_option: str
@@ -192,15 +262,23 @@ class AgentOrchestrator:
             )
 
     # ------------------------------------------------------------------
-    # Category A: Contract & Policy Information Retrieval
+    # Category A: Contract & Policy Information Retrieval (Read-Only)
     # ------------------------------------------------------------------
-    def _handle_contract_query(self, task_id: str, request: str) -> OrchestratorResponse:
+    def _handle_contract_query(
+        self, task_id: str, request: str, plan: Optional[TaskPlan] = None
+    ) -> OrchestratorResponse:
         docs_dir = self._get_documents_dir()
         contracts_dir = docs_dir / "contracts"
         search_dir = contracts_dir if contracts_dir.exists() else docs_dir
 
-        vendor = self._extract_vendor_from_query(request)
+        vendor = (
+            (plan.target_vendor if plan and plan.target_vendor else None)
+            or self._extract_vendor_from_query(request)
+        )
         files = discover_files(search_dir)
+
+        req_lower = request.lower()
+        focus_lower = (plan.query_focus or "").lower() if plan else ""
 
         for fpath in files:
             try:
@@ -210,12 +288,66 @@ class AgentOrchestrator:
             if vendor and not self._content_matches_vendor(doc.raw_text, fpath.name, vendor):
                 continue
 
+            doc_name = fpath.name
+
+            # Check if query asks for termination and/or renewal terms
+            is_term_renewal_query = (
+                "termination" in req_lower
+                or "renewal" in req_lower
+                or "cancel" in req_lower
+                or "termination" in focus_lower
+                or "renewal" in focus_lower
+            )
+            if is_term_renewal_query:
+                renewal_match = re.search(
+                    r"(?:^|\n)\s*(\d*\.?\s*Renewal:[^\n]+(?:\n(?!\d+\.)[^\n]+)*)",
+                    doc.raw_text,
+                    re.IGNORECASE,
+                )
+                term_match = re.search(
+                    r"(?:^|\n)\s*(\d*\.?\s*Termination:[^\n]+(?:\n(?!\d+\.)[^\n]+)*)",
+                    doc.raw_text,
+                    re.IGNORECASE,
+                )
+
+                clauses = []
+                snippet_parts = []
+                if renewal_match:
+                    r_text = renewal_match.group(1).strip()
+                    clauses.append(r_text)
+                    snippet_parts.append(r_text)
+                if term_match:
+                    t_text = term_match.group(1).strip()
+                    clauses.append(t_text)
+                    snippet_parts.append(t_text)
+
+                if clauses:
+                    answer = (
+                        f"Contract terms for {vendor or 'the vendor'} ({doc_name}):\n"
+                        + "\n".join(f"- {c}" for c in clauses)
+                    )
+                    ev = {
+                        "field": "contract_terms",
+                        "value": " | ".join(clauses),
+                        "source_file": doc_name,
+                        "page": 1,
+                        "snippet": " ... ".join(snippet_parts),
+                    }
+                    return OrchestratorResponse(
+                        task_id=task_id,
+                        status=TaskStatus.COMPLETED,
+                        success=True,
+                        summary=answer,
+                        answer=answer,
+                        evidence=ev,
+                    )
+
+            # Contract expiry date extraction
             ext = extract_fields(doc, requested_fields=["vendor", "expiry_date", "payment_terms"])
             ext = verify_extraction_result(ext, doc_raw_text=doc.raw_text)
             exp_field = ext.fields.get("expiry_date")
             if exp_field and (exp_field.normalized_value or exp_field.extracted_value):
                 exp_val = str(exp_field.normalized_value or exp_field.extracted_value)
-                doc_name = fpath.name
                 ev = {
                     "field": "expiry_date",
                     "value": exp_val,
@@ -241,19 +373,102 @@ class AgentOrchestrator:
             task_id=task_id,
             status=TaskStatus.COMPLETED,
             success=False,
-            summary="Could not find contract expiry date in available documents.",
-            answer="No verified contract expiry date found.",
+            summary=f"Could not find contract details for {vendor or 'the vendor'} in available documents.",
+            answer=f"No verified contract details found for {vendor or 'the vendor'}.",
         )
 
     # ------------------------------------------------------------------
-    # Categories A, B, C, D: Invoice Extraction & Recording Workflow
+    # Read-Only Invoice Information Retrieval (Read-Only)
     # ------------------------------------------------------------------
-    def _handle_invoice_workflow(self, task_id: str, request: str) -> OrchestratorResponse:
+    def _handle_invoice_query(
+        self, task_id: str, request: str, plan: Optional[TaskPlan] = None
+    ) -> OrchestratorResponse:
         docs_dir = self._get_documents_dir()
         invoices_dir = docs_dir / "invoices"
         search_dir = invoices_dir if invoices_dir.exists() else docs_dir
 
-        vendor = self._extract_vendor_from_query(request)
+        vendor = (
+            (plan.target_vendor if plan and plan.target_vendor else None)
+            or self._extract_vendor_from_query(request)
+        )
+        all_files = discover_files(search_dir)
+
+        req_fields = [
+            "vendor",
+            "invoice_number",
+            "invoice_date",
+            "due_date",
+            "subtotal",
+            "tax",
+            "total_amount",
+            "currency",
+        ]
+
+        for fpath in all_files:
+            try:
+                doc = read_document(fpath)
+            except Exception:
+                continue
+            if vendor and not self._content_matches_vendor(doc.raw_text, fpath.name, vendor):
+                continue
+
+            ext = extract_fields(doc, requested_fields=req_fields)
+            ext = verify_extraction_result(ext, doc_raw_text=doc.raw_text)
+
+            tot_f = ext.fields.get("total_amount")
+            inv_f = ext.fields.get("invoice_number")
+            due_f = ext.fields.get("due_date")
+            amt = tot_f.normalized_value if tot_f else None
+            curr = ext.fields.get("currency")
+            curr_str = str(curr.normalized_value or curr.extracted_value or "INR") if curr else "INR"
+            inv_num_val = str(inv_f.normalized_value or inv_f.extracted_value or "N/A") if inv_f else "N/A"
+            due_val = str(due_f.normalized_value or due_f.extracted_value or "N/A") if due_f else "N/A"
+
+            summary = (
+                f"Invoice inquiry for {vendor} ({fpath.name}): "
+                f"Invoice #{inv_num_val}, Amount: {curr_str} {amt}, Due: {due_val}."
+            )
+            ev = {
+                "source_document": fpath.name,
+                "invoice_number": inv_num_val,
+                "amount": amt,
+                "snippet": tot_f.source_evidence if tot_f else None,
+            }
+            return OrchestratorResponse(
+                task_id=task_id,
+                status=TaskStatus.COMPLETED,
+                success=True,
+                summary=summary,
+                answer=summary,
+                evidence=ev,
+                records_created=[],
+                payments_created=[],
+            )
+
+        msg = f"No invoice found matching inquiry for {vendor or 'requested vendor'}; nothing recorded."
+        return OrchestratorResponse(
+            task_id=task_id,
+            status=TaskStatus.COMPLETED,
+            success=False,
+            summary=msg,
+            answer=msg,
+            records_created=[],
+        )
+
+    # ------------------------------------------------------------------
+    # Categories A, B, C, D: Invoice Extraction & Recording Workflow (Mutating)
+    # ------------------------------------------------------------------
+    def _handle_invoice_workflow(
+        self, task_id: str, request: str, plan: Optional[TaskPlan] = None
+    ) -> OrchestratorResponse:
+        docs_dir = self._get_documents_dir()
+        invoices_dir = docs_dir / "invoices"
+        search_dir = invoices_dir if invoices_dir.exists() else docs_dir
+
+        vendor = (
+            (plan.target_vendor if plan and plan.target_vendor else None)
+            or self._extract_vendor_from_query(request)
+        )
         all_files = discover_files(search_dir)
 
         req_fields = [
@@ -563,20 +778,29 @@ class AgentOrchestrator:
     # ------------------------------------------------------------------
     # Category E: Governed Payment Execution
     # ------------------------------------------------------------------
-    def _handle_payment_request(self, task_id: str, request: str) -> OrchestratorResponse:
-        m_id = re.search(r"\b(INV-\d+)\b", request, re.IGNORECASE)
+    def _handle_payment_request(
+        self, task_id: str, request: str, plan: Optional[TaskPlan] = None
+    ) -> OrchestratorResponse:
         target_invoice: Optional[Dict[str, Any]] = None
 
-        if m_id:
-            rec_id = m_id.group(1).upper()
+        target_rec_id = plan.target_record_id if plan and plan.target_record_id else None
+        if not target_rec_id:
+            m = re.search(r"\b(INV-\d+)\b", request, re.IGNORECASE)
+            if m:
+                target_rec_id = m.group(1).upper()
+
+        if target_rec_id:
             try:
-                resp = self.client.get_invoice(rec_id)
+                resp = self.client.get_invoice(target_rec_id.upper())
                 target_invoice = resp.get("invoice", resp) if isinstance(resp, dict) else None
             except Exception:
                 target_invoice = None
 
         if target_invoice is None:
-            vendor = self._extract_vendor_from_query(request)
+            vendor = (
+                (plan.target_vendor if plan and plan.target_vendor else None)
+                or self._extract_vendor_from_query(request)
+            )
             if vendor:
                 invs = self.client.list_invoices(vendor=vendor.split()[0])
                 if invs:

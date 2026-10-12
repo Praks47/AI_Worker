@@ -185,3 +185,4 @@ class OrchestratorResponse:
     approval_required: bool = False
     approval_token: Optional[str] = None
     approval_details: Optional[Dict[str, Any]] = field(default=None)
+    execution_trace: Optional[Dict[str, Any]] = None

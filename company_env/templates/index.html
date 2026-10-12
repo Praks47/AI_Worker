@@ -123,6 +123,12 @@
         </div>
       </div>
 
+      <!-- LLM Inference Trace Box -->
+      <div id="res-llm-container" style="display: none; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 700; color: #4338ca; text-transform: uppercase;">LLM Task Interpretation Trace:</div>
+        <div id="res-llm-box" style="margin-top: 4px; padding: 10px 14px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; font-size: 13px;"></div>
+      </div>
+
       <div style="margin-bottom: 16px;">
         <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Summary / Answer:</div>
         <div id="res-summary-box" style="font-size: 15px; font-weight: 500; margin-top: 4px; padding: 12px; background: #f8fafc; border-radius: 6px; border-left: 3px solid var(--accent);"></div>
@@ -621,6 +627,27 @@
     badge.innerText = resp.status || 'UNKNOWN';
 
     document.getElementById('res-summary-box').innerText = resp.summary || resp.answer || 'No summary returned.';
+
+    // LLM Trace
+    const llmCont = document.getElementById('res-llm-container');
+    const llmBox = document.getElementById('res-llm-box');
+    if (resp.execution_trace && resp.execution_trace.inference_performed) {
+      llmCont.style.display = 'block';
+      const tr = resp.execution_trace;
+      llmBox.innerHTML = `
+        <div style="display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 4px;">
+          <span><strong>Provider:</strong> ${tr.provider ? tr.provider.toUpperCase() : 'GROQ'}</span>
+          <span><strong>Model:</strong> <code>${tr.model || 'qwen/qwen3.8-27b'}</code></span>
+          <span><strong>Intent:</strong> <span class="badge ${tr.is_mutating ? 'recording' : 'verified'}">${tr.raw_intent || '—'}</span></span>
+          <span><strong>Mutating:</strong> ${tr.is_mutating ? '<span style="color:#b91c1c;font-weight:600;">Yes</span>' : '<span style="color:#15803d;font-weight:600;">No</span>'}</span>
+          <span><strong>Latency:</strong> ${tr.latency_ms ? tr.latency_ms + 'ms' : '—'}</span>
+        </div>
+        ${tr.target_vendor ? `<div style="margin-top: 2px;"><strong>Extracted Vendor:</strong> ${tr.target_vendor}</div>` : ''}
+        ${tr.confidence !== undefined ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">Confidence: ${(tr.confidence * 100).toFixed(0)}%</div>` : ''}
+      `;
+    } else {
+      llmCont.style.display = 'none';
+    }
 
     // Evidence
     const evCont = document.getElementById('res-evidence-container');

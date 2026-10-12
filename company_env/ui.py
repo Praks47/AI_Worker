@@ -268,6 +268,7 @@ def _serialize_orchestrator_response(resp: OrchestratorResponse) -> Dict[str, An
         "approval_required": resp.approval_required,
         "approval_token": resp.approval_token,
         "approval_details": resp.approval_details,
+        "execution_trace": getattr(resp, "execution_trace", None),
     }
 
 
